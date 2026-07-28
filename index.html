@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#172033" />
+  <meta name="description" content="Planejador profissional de mesas e cadeiras para eventos." />
+  <title>PlanejaSalão — Layouts de Eventos</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">PS</div>
+        <div><strong>PlanejaSalão</strong><span>Layouts profissionais para eventos</span></div>
+      </div>
+      <div class="top-actions">
+        <button class="button button-muted" id="save-project">Salvar projeto</button>
+        <label class="button button-muted file-button">Abrir projeto<input id="open-project" type="file" accept="application/json" /></label>
+        <button class="button button-muted" id="reset-project">Restaurar</button>
+        <button class="button button-primary" id="print-top">Imprimir / PDF</button>
+      </div>
+    </header>
+
+    <div class="workspace">
+      <aside class="sidebar">
+        <section class="panel-section">
+          <div class="section-heading"><span class="step">01</span><div><h2>Dados da proposta</h2><p>Informações para a apresentação.</p></div></div>
+          <div class="form-grid">
+            <label class="field field-full"><span>Nome do salão</span><input data-key="venueName" type="text" /></label>
+            <label class="field field-full"><span>Cliente</span><input data-key="clientName" type="text" placeholder="Nome do cliente" /></label>
+            <label class="field field-full"><span>Evento</span><input data-key="eventName" type="text" /></label>
+            <label class="field field-full"><span>Data</span><input data-key="eventDate" type="date" /></label>
+          </div>
+        </section>
+
+        <section class="panel-section">
+          <div class="section-heading"><span class="step">02</span><div><h2>Medidas do salão</h2><p>Formato retangular conforme a planta enviada.</p></div></div>
+          <div class="form-grid form-grid-2">
+            <label class="field"><span>Largura total</span><div class="input-with-suffix"><input data-key="roomWidth" type="number" min="1" step="0.1" /><small>m</small></div></label>
+            <label class="field"><span>Largura livre até a cozinha</span><div class="input-with-suffix"><input data-key="clearWidth" type="number" min="0" step="0.1" /><small>m</small></div></label>
+            <label class="field"><span>Comprimento</span><div class="input-with-suffix"><input data-key="roomDepth" type="number" min="1" step="0.1" /><small>m</small></div></label>
+            <label class="field"><span>Folga das mesas</span><div class="input-with-suffix"><input data-key="clearance" type="number" min="0.2" step="0.05" /><small>m</small></div></label>
+          </div>
+        </section>
+
+        <section class="panel-section">
+          <div class="section-heading"><span class="step">03</span><div><h2>Áreas fixas</h2><p>Palco e cozinha ficam bloqueados.</p></div></div>
+          <div class="subsection-title">Palco</div>
+          <div class="form-grid form-grid-2">
+            <label class="field"><span>Largura</span><div class="input-with-suffix"><input data-key="stageWidth" type="number" min="0" step="0.1" /><small>m</small></div></label>
+            <label class="field"><span>Comprimento</span><div class="input-with-suffix"><input data-key="stageDepth" type="number" min="0" step="0.1" /><small>m</small></div></label>
+          </div>
+          <label class="toggle-row"><input data-key="kitchenEnabled" type="checkbox" /><span><strong>Reservar cozinha</strong><small>A largura é calculada pela diferença entre 24 m e 22 m; a profundidade continua editável.</small></span></label>
+          <div class="form-grid form-grid-2" id="kitchen-fields">
+            <label class="field"><span>Largura calculada</span><div class="input-with-suffix"><input id="kitchen-width-calculated" type="number" readonly tabindex="-1" /><small>m</small></div></label>
+            <label class="field"><span>Profundidade da cozinha</span><div class="input-with-suffix"><input data-key="kitchenDepth" type="number" min="0" step="0.1" /><small>m</small></div></label>
+          </div>
+        </section>
+
+        <section class="panel-section">
+          <div class="section-heading"><span class="step">04</span><div><h2>Mesas e cadeiras</h2><p>O sistema tenta acomodar tudo automaticamente.</p></div></div>
+          <div class="segmented">
+            <button data-shape="round">Mesas redondas</button>
+            <button data-shape="rect">Mesas retangulares</button>
+          </div>
+          <div class="form-grid form-grid-2">
+            <label class="field"><span>Quantidade de mesas</span><input data-key="tableCount" type="number" min="0" max="200" step="1" /></label>
+            <label class="field"><span>Quantidade de cadeiras</span><input data-key="chairCount" type="number" min="0" max="2000" step="1" /></label>
+            <label class="field"><span>Cadeiras por mesa</span><input data-key="chairsPerTable" type="number" min="1" max="20" step="1" /></label>
+            <label class="field" id="round-diameter-field"><span>Diâmetro da mesa</span><div class="input-with-suffix"><input data-key="roundDiameter" type="number" min="0.6" step="0.05" /><small>m</small></div></label>
+            <label class="field rect-only"><span>Largura da mesa</span><div class="input-with-suffix"><input data-key="rectWidth" type="number" min="0.5" step="0.05" /><small>m</small></div></label>
+            <label class="field rect-only"><span>Profundidade da mesa</span><div class="input-with-suffix"><input data-key="rectDepth" type="number" min="0.4" step="0.05" /><small>m</small></div></label>
+          </div>
+        </section>
+
+        <section class="panel-section">
+          <div class="section-heading"><span class="step">05</span><div><h2>Áreas especiais</h2><p>Usadas nos padrões alternativos.</p></div></div>
+          <div class="form-grid form-grid-2">
+            <label class="field"><span>Corredor central</span><div class="input-with-suffix"><input data-key="aisleWidth" type="number" min="0.8" step="0.1" /><small>m</small></div></label>
+            <label class="field"><span>Largura da pista</span><div class="input-with-suffix"><input data-key="danceWidth" type="number" min="2" step="0.1" /><small>m</small></div></label>
+            <label class="field"><span>Comprimento da pista</span><div class="input-with-suffix"><input data-key="danceDepth" type="number" min="2" step="0.1" /><small>m</small></div></label>
+          </div>
+        </section>
+      </aside>
+
+      <main class="content" id="main-content"></main>
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
