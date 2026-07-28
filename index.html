@@ -83,6 +83,35 @@
             <label class="field"><span>Comprimento da pista</span><div class="input-with-suffix"><input data-key="danceDepth" type="number" min="2" step="0.1" /><small>m</small></div></label>
           </div>
         </section>
+
+        <section class="panel-section">
+          <div class="section-heading"><span class="step">06</span><div><h2>Editor manual</h2><p>Arraste mesas completas e adicione textos à planta.</p></div></div>
+
+          <button class="button button-sidebar button-primary" id="add-text" type="button">+ Adicionar texto</button>
+          <div class="editor-help">Clique em uma mesa e arraste: as cadeiras acompanham automaticamente. O programa impede posições fora do salão ou sobre áreas bloqueadas.</div>
+
+          <div class="text-editor" id="text-editor">
+            <div class="subsection-title">Texto selecionado</div>
+            <label class="field field-full"><span>Conteúdo</span><textarea id="text-content" rows="3" placeholder="Selecione ou adicione um texto"></textarea></label>
+            <div class="form-grid form-grid-2">
+              <label class="field"><span>Cor</span><input id="text-color" class="color-input" type="color" value="#176b5b" /></label>
+              <label class="field"><span>Escala</span><input id="text-scale" type="number" min="0.4" max="4" step="0.1" /></label>
+              <label class="field"><span>Rotação</span><div class="input-with-suffix"><input id="text-rotation" type="number" min="-180" max="180" step="1" /><small>°</small></div></label>
+              <label class="field"><span>Posição X</span><div class="input-with-suffix"><input id="text-x" type="number" min="0" step="0.1" /><small>m</small></div></label>
+              <label class="field"><span>Posição Y</span><div class="input-with-suffix"><input id="text-y" type="number" min="0" step="0.1" /><small>m</small></div></label>
+            </div>
+            <div class="color-swatches" aria-label="Cores rápidas">
+              <button type="button" data-text-color="#172033" style="--swatch:#172033" aria-label="Preto"></button>
+              <button type="button" data-text-color="#176b5b" style="--swatch:#176b5b" aria-label="Verde"></button>
+              <button type="button" data-text-color="#b42318" style="--swatch:#b42318" aria-label="Vermelho"></button>
+              <button type="button" data-text-color="#175cd3" style="--swatch:#175cd3" aria-label="Azul"></button>
+              <button type="button" data-text-color="#8a5a00" style="--swatch:#8a5a00" aria-label="Dourado"></button>
+            </div>
+            <button class="button button-sidebar button-danger" id="delete-text" type="button">Excluir texto</button>
+          </div>
+
+          <button class="button button-sidebar button-muted-light" id="reset-manual-layout" type="button">Refazer padrão automático</button>
+        </section>
       </aside>
 
       <main class="content" id="main-content"></main>

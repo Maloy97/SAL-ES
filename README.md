@@ -1,66 +1,58 @@
-# PlanejaSalão — v1.1
+# PlanejaSalão
 
-Aplicativo web para calcular a área do salão, distribuir mesas e cadeiras e gerar propostas de montagem para apresentar aos clientes.
+Aplicação web estática para criar propostas de montagem do salão do clube, calcular áreas e gerar padrões de mesas e cadeiras.
 
-![Prévia do layout](preview-layout.png)
+## Novidades da versão 1.2
+
+- Mesas podem ser clicadas e arrastadas diretamente na planta.
+- As cadeiras acompanham a mesa automaticamente durante o movimento.
+- Validação manual impede posicionar mesas fora do salão, sobre o palco, cozinha, áreas livres ou outras mesas.
+- Cada um dos quatro padrões guarda sua própria montagem manual.
+- Botão **Refazer padrão automático** restaura apenas a distribuição das mesas do padrão atual.
+- Ferramenta de texto com conteúdo, cor, escala, rotação e posição X/Y.
+- Textos também podem ser arrastados diretamente na planta.
+- Montagens manuais e textos são salvos no navegador e incluídos no arquivo JSON do projeto.
+- Exportação PNG e impressão/PDF incluem a montagem final e os textos, sem marcas de seleção do editor.
 
 ## Medidas configuradas
 
-- Largura total do salão: **24,00 m**
-- Largura livre até o início da cozinha: **22,00 m**
-- Comprimento: **22,60 m**
-- Palco: **4,50 × 9,40 m**
-- Cozinha: largura calculada de **2,00 m** e profundidade inicial de **10,80 m**
+- Salão retangular: 24 m × 22,60 m.
+- Largura livre até a cozinha: 22 m.
+- Cozinha: largura calculada pela diferença entre a largura total e a largura livre.
+- Palco: 4,50 m × 9,40 m.
 
-## Recursos
+Todas as medidas podem ser alteradas na barra lateral.
 
-- Mesas redondas ou retangulares.
-- Quantidade de mesas e cadeiras configurável.
-- Cadeiras por mesa e distância de circulação configuráveis.
-- Cálculo da área bruta, área útil e ocupação aproximada.
-- Bloqueio automático do palco e da cozinha.
-- Quatro padrões de montagem:
-  - Banquete equilibrado
-  - Corredor central
-  - Pista central
-  - Palco em foco
-- Avisos quando mesas ou cadeiras não cabem.
-- Exportação da planta em PNG.
-- Impressão profissional e salvamento em PDF pelo navegador.
-- Salvamento automático no navegador.
-- Importação e exportação do projeto em JSON.
+## Como usar
 
-## Abrir no computador
+1. Abra `index.html` no navegador ou publique a pasta na Vercel.
+2. Informe os dados do evento, medidas, quantidades e dimensões das mesas.
+3. Escolha um dos quatro padrões automáticos.
+4. Arraste uma mesa pela área central. Todas as cadeiras se movem junto.
+5. Use **Adicionar texto** para criar legendas, nomes de setores, buffet, recepção ou observações.
+6. Selecione o texto na planta e altere conteúdo, cor, escala, rotação ou coordenadas.
+7. Exporte a planta em PNG ou use **Gerar apresentação PDF**.
+8. Use **Salvar projeto** para baixar um JSON que preserva também o layout manual.
 
-Este projeto não precisa de instalação nem de `npm`.
+## Publicação na Vercel
 
-Basta abrir o arquivo `index.html` no navegador. Para testar com um servidor local, também é possível usar:
+O projeto não possui dependências e não exige etapa de compilação.
 
-```bash
-python -m http.server 8000
-```
+- Crie um repositório no GitHub.
+- Envie os arquivos desta pasta para a raiz do repositório.
+- Na Vercel, clique em **Add New Project** e importe o repositório.
+- Não preencha comando de build.
+- Publique o projeto.
 
-Depois abra `http://localhost:8000`.
+## Estrutura
 
-## Publicar no GitHub
-
-1. Crie um repositório vazio.
-2. Envie os arquivos desta pasta.
-3. Faça o commit e o push.
-
-O projeto possui poucos arquivos e está pronto para versionamento.
-
-## Publicar na Vercel
-
-1. Entre na Vercel e clique em **Add New > Project**.
-2. Importe o repositório do GitHub.
-3. Em **Framework Preset**, selecione **Other**.
-4. Não informe comando de build.
-5. Não altere o diretório de saída.
-6. Clique em **Deploy**.
+- `index.html`: interface.
+- `styles.css`: visual e estados do editor.
+- `app.js`: cálculos, geração dos padrões, arraste, textos, persistência e exportação.
+- `vercel.json`: configuração de publicação estática.
+- `referencia-salao.png`: desenho de referência.
+- `preview-layout.png`: imagem de apresentação do projeto.
 
 ## Observação técnica
 
-A planta foi corrigida para um retângulo de 24,00 × 22,60 m. A medida de 22,00 m foi interpretada como o espaço livre até a cozinha, portanto a cozinha ocupa os 2,00 m restantes na lateral direita. A profundidade da cozinha permanece editável na barra lateral.
-
-Antes de usar uma planta em um evento real, confirme portas, saídas de emergência, extintores, acessibilidade e exigências do AVCB.
+A planta é uma estimativa de planejamento. Antes da montagem real, confira portas, saídas de emergência, extintores, rotas acessíveis, capacidade autorizada e exigências do AVCB.

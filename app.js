@@ -20,7 +20,9 @@ const DEFAULT_CONFIG = {
   clearance: 0.55,
   aisleWidth: 1.8,
   danceWidth: 5.5,
-  danceDepth: 6.5
+  danceDepth: 6.5,
+  manualLayouts: {},
+  annotationsByLayout: {}
 };
 
 const LAYOUT_INFO = {
@@ -44,32 +46,55 @@ const LAYOUT_INFO = {
 
 let config = loadConfig();
 let selectedKey = 'balanced';
+let selectedAnnotationId = null;
 let layouts = [];
+let editorMessage = 'Arraste uma mesa ou selecione um texto para editar.';
+let suppressCanvasClickUntil = 0;
+
+function cloneDefaultConfig() {
+  return JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+}
+
+function normalizeConfig(raw = {}) {
+  const normalized = {
+    ...cloneDefaultConfig(),
+    ...raw
+  };
+  normalized.manualLayouts = raw.manualLayouts && typeof raw.manualLayouts === 'object'
+    ? raw.manualLayouts
+    : {};
+  normalized.annotationsByLayout = raw.annotationsByLayout && typeof raw.annotationsByLayout === 'object'
+    ? raw.annotationsByLayout
+    : {};
+  return normalized;
+}
 
 function loadConfig() {
   try {
-    const stored = localStorage.getItem('planeja-salao-config-v2');
-    if (stored) return { ...DEFAULT_CONFIG, ...JSON.parse(stored) };
+    const storedV3 = localStorage.getItem('planeja-salao-config-v3');
+    if (storedV3) return normalizeConfig(JSON.parse(storedV3));
+
+    const storedV2 = localStorage.getItem('planeja-salao-config-v2');
+    if (storedV2) return normalizeConfig(JSON.parse(storedV2));
 
     // Migração automática da primeira versão, que interpretava o salão como trapézio.
     const legacyStored = localStorage.getItem('planeja-salao-config-v1');
     if (legacyStored) {
       const legacy = JSON.parse(legacyStored);
-      return {
-        ...DEFAULT_CONFIG,
+      return normalizeConfig({
         ...legacy,
         roomWidth: Number(legacy.roomTop ?? DEFAULT_CONFIG.roomWidth),
         clearWidth: Number(legacy.roomBottom ?? DEFAULT_CONFIG.clearWidth)
-      };
+      });
     }
-    return { ...DEFAULT_CONFIG };
+    return cloneDefaultConfig();
   } catch {
-    return { ...DEFAULT_CONFIG };
+    return cloneDefaultConfig();
   }
 }
 
 function persist() {
-  localStorage.setItem('planeja-salao-config-v2', JSON.stringify(config));
+  localStorage.setItem('planeja-salao-config-v3', JSON.stringify(config));
 }
 
 function clamp(value, min, max) {
@@ -87,6 +112,11 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#039;');
+}
+
+function safeNumber(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 function roomWidthAtY() {
@@ -195,6 +225,21 @@ function distributeChairs(placedCount) {
   return result;
 }
 
+function applySavedManualPositions(key, placements) {
+  const saved = Array.isArray(config.manualLayouts?.[key]) ? config.manualLayouts[key] : [];
+  if (!saved.length) return placements;
+  const savedById = new Map(saved.map((item) => [Number(item.id), item]));
+  return placements.map((placement) => {
+    const manual = savedById.get(placement.id);
+    if (!manual) return placement;
+    return {
+      ...placement,
+      x: safeNumber(manual.x, placement.x),
+      y: safeNumber(manual.y, placement.y)
+    };
+  });
+}
+
 function generateLayout(key) {
   const obstacles = getObstacles();
   const reserved = getReservedAreas(key);
@@ -289,8 +334,9 @@ function generateLayout(key) {
   } else {
     selected = candidates.slice(0, wanted);
   }
+
   const assignedChairs = distributeChairs(selected.length);
-  const placements = selected.map((candidate, index) => ({
+  const automaticPlacements = selected.map((candidate, index) => ({
     id: index + 1,
     x: candidate.x + (candidate.w - envelope.actualW) / 2,
     y: candidate.y + (candidate.h - envelope.actualH) / 2,
@@ -299,6 +345,7 @@ function generateLayout(key) {
     angle,
     chairs: assignedChairs[index] || 0
   }));
+  const placements = applySavedManualPositions(key, automaticPlacements);
 
   const notes = [];
   if (placements.length < config.tableCount) {
@@ -311,6 +358,9 @@ function generateLayout(key) {
   if (key === 'central-aisle') notes.push(`Corredor preservado com ${config.aisleWidth.toFixed(2)} m.`);
   if (key === 'dance-floor') notes.push(`Área central livre de ${round1(config.danceWidth * config.danceDepth)} m².`);
   if (key === 'stage-focus') notes.push('Faixa técnica mantida junto ao palco.');
+  if (Array.isArray(config.manualLayouts?.[key]) && config.manualLayouts[key].length) {
+    notes.push('Este padrão possui ajustes manuais de posicionamento.');
+  }
 
   return {
     key,
@@ -326,10 +376,13 @@ function svgChair(x, y, angle = 0) {
   return `<g transform="rotate(${angle} ${x} ${y})"><rect x="${x - 0.19}" y="${y - 0.19}" width="0.38" height="0.38" rx="0.07" class="svg-chair"/><line x1="${x - 0.16}" y1="${y - 0.26}" x2="${x + 0.16}" y2="${y - 0.26}" class="svg-chair-back"/></g>`;
 }
 
-function tableGroup(placement) {
+function tableGroup(placement, interactive = false) {
   const cx = placement.x + placement.w / 2;
   const cy = placement.y + placement.h / 2;
   let chairs = '';
+  const interactionAttrs = interactive
+    ? ` data-table-id="${placement.id}" class="furniture-group draggable-furniture" role="button" aria-label="Arrastar mesa ${placement.id}"`
+    : ' class="furniture-group"';
 
   if (config.tableShape === 'round') {
     const radius = placement.w / 2 + 0.43;
@@ -339,7 +392,7 @@ function tableGroup(placement) {
       const y = cy + Math.sin(theta) * radius;
       chairs += svgChair(x, y, (theta * 180) / Math.PI + 90);
     }
-    return `<g class="furniture-group">${chairs}<circle cx="${cx}" cy="${cy}" r="${placement.w / 2}" class="svg-table"/><text x="${cx}" y="${cy + 0.12}" text-anchor="middle" class="svg-table-label">M${placement.id}</text></g>`;
+    return `<g${interactionAttrs}><g>${chairs}<circle cx="${cx}" cy="${cy}" r="${placement.w / 2}" class="svg-table"/><text x="${cx}" y="${cy + 0.12}" text-anchor="middle" class="svg-table-label">M${placement.id}</text></g></g>`;
   }
 
   const points = [];
@@ -365,7 +418,51 @@ function tableGroup(placement) {
   addSide(rightCount, 'right');
   chairs = points.map((point) => svgChair(point.x, point.y, point.angle)).join('');
 
-  return `<g transform="rotate(${placement.angle} ${cx} ${cy})" class="furniture-group">${chairs}<rect x="${placement.x}" y="${placement.y}" width="${placement.w}" height="${placement.h}" rx="0.12" class="svg-table"/><text x="${cx}" y="${cy + 0.12}" text-anchor="middle" class="svg-table-label">M${placement.id}</text></g>`;
+  return `<g${interactionAttrs}><g transform="rotate(${placement.angle} ${cx} ${cy})">${chairs}<rect x="${placement.x}" y="${placement.y}" width="${placement.w}" height="${placement.h}" rx="0.12" class="svg-table"/><text x="${cx}" y="${cy + 0.12}" text-anchor="middle" class="svg-table-label">M${placement.id}</text></g></g>`;
+}
+
+function getAnnotations(key = selectedKey) {
+  if (!Array.isArray(config.annotationsByLayout[key])) config.annotationsByLayout[key] = [];
+  return config.annotationsByLayout[key];
+}
+
+function getSelectedAnnotation() {
+  return getAnnotations().find((item) => item.id === selectedAnnotationId) || null;
+}
+
+function annotationTextSvg(annotation) {
+  const lines = String(annotation.text || 'Texto').split(/\r?\n/).slice(0, 8);
+  const longest = Math.max(1, ...lines.map((line) => line.length));
+  const width = Math.max(1.2, longest * 0.37 + 0.5);
+  const height = Math.max(0.8, lines.length * 0.75 + 0.2);
+  const startY = -((lines.length - 1) * 0.72) / 2 + 0.22;
+  const tspans = lines.map((line, index) => `<tspan x="0" y="${startY + index * 0.72}">${escapeHtml(line || ' ')}</tspan>`).join('');
+  const selected = annotation.id === selectedAnnotationId;
+  return `
+    <g data-annotation-id="${escapeHtml(annotation.id)}" class="annotation-group" transform="translate(${annotation.x} ${annotation.y})" role="button" aria-label="Mover texto ${escapeHtml(annotation.text)}">
+      <g transform="rotate(${annotation.rotation}) scale(${annotation.scale})">
+        <rect x="${-width / 2}" y="${-height / 2}" width="${width}" height="${height}" rx="0.16" class="annotation-hitbox"/>
+        ${selected ? `<rect data-editor-only="true" x="${-width / 2}" y="${-height / 2}" width="${width}" height="${height}" rx="0.16" class="annotation-selection"/>` : ''}
+        <text x="0" y="0" text-anchor="middle" dominant-baseline="middle" class="svg-annotation-text" style="fill:${escapeHtml(annotation.color)}">${tspans}</text>
+      </g>
+    </g>`;
+}
+
+function renderAnnotations(layoutKey, compact) {
+  const annotations = Array.isArray(config.annotationsByLayout[layoutKey])
+    ? config.annotationsByLayout[layoutKey]
+    : [];
+  return annotations
+    .map((annotation) => {
+      if (compact || layoutKey !== selectedKey) {
+        const deselected = { ...annotation, id: `compact-${annotation.id}` };
+        return annotationTextSvg(deselected)
+          .replace('class="annotation-group"', 'class="annotation-group annotation-compact"')
+          .replace(/ data-annotation-id="[^"]+"/, '');
+      }
+      return annotationTextSvg(annotation);
+    })
+    .join('');
 }
 
 function renderFloorPlan(layout, compact = false) {
@@ -403,16 +500,16 @@ function renderFloorPlan(layout, compact = false) {
   const legend = compact ? '' : `
     <text x="0.2" y="${stageY - 0.25}" class="svg-small-note">${config.stageWidth.toFixed(2).replace('.', ',')} × ${config.stageDepth.toFixed(2).replace('.', ',')} m</text>
     <g transform="translate(0.2,-1.45)">
-      <rect x="0" y="0" width="5.8" height="0.68" rx="0.18" class="svg-legend-bg"/>
-      <circle cx="0.38" cy="0.34" r="0.14" class="svg-table"/><text x="0.65" y="0.44" class="svg-legend-text">mesa</text>
-      <rect x="1.72" y="0.20" width="0.28" height="0.28" rx="0.05" class="svg-chair"/><text x="2.17" y="0.44" class="svg-legend-text">cadeira</text>
-      <rect x="3.55" y="0.20" width="0.34" height="0.27" class="svg-reserved"/><text x="4.05" y="0.44" class="svg-legend-text">área livre</text>
+      <rect x="0" y="0" width="7.4" height="0.68" rx="0.18" class="svg-legend-bg"/>
+      <circle cx="0.38" cy="0.34" r="0.14" class="svg-table"/><text x="0.65" y="0.44" class="svg-legend-text">mesa arrastável</text>
+      <rect x="2.75" y="0.20" width="0.28" height="0.28" rx="0.05" class="svg-chair"/><text x="3.18" y="0.44" class="svg-legend-text">cadeira</text>
+      <rect x="4.35" y="0.20" width="0.34" height="0.27" class="svg-reserved"/><text x="4.85" y="0.44" class="svg-legend-text">área bloqueada</text>
     </g>`;
 
-  return `<svg ${id} class="${compact ? 'floorplan floorplan-compact' : 'floorplan'}" viewBox="${-viewPad} ${-viewPad} ${config.roomWidth + viewPad * 2} ${config.roomDepth + viewPad * 2}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Planta do padrão ${escapeHtml(layout.name)}">
+  return `<svg ${id} class="${compact ? 'floorplan floorplan-compact' : 'floorplan floorplan-editor'}" viewBox="${-viewPad} ${-viewPad} ${config.roomWidth + viewPad * 2} ${config.roomDepth + viewPad * 2}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Planta do padrão ${escapeHtml(layout.name)}">
     <rect x="${-viewPad}" y="${-viewPad}" width="${config.roomWidth + viewPad * 2}" height="${config.roomDepth + viewPad * 2}" class="svg-page"/>
     <polygon points="${roomPoints}" class="svg-room"/>
-    ${dimensions}${reserved}${obstacleSvg}${layout.placements.map(tableGroup).join('')}${legend}
+    ${dimensions}${reserved}${obstacleSvg}${layout.placements.map((placement) => tableGroup(placement, !compact)).join('')}${renderAnnotations(layout.key, compact)}${legend}
   </svg>`;
 }
 
@@ -430,6 +527,7 @@ function renderMain() {
   const occupancy = usableArea > 0 ? (furnitureArea / usableArea) * 100 : 0;
   const requestedCapacity = config.tableCount * config.chairsPerTable;
   const selectedPlacedChairs = selectedLayout.placements.reduce((sum, item) => sum + item.chairs, 0);
+  const hasManualLayout = Array.isArray(config.manualLayouts?.[selectedKey]) && config.manualLayouts[selectedKey].length > 0;
 
   document.getElementById('main-content').innerHTML = `
     <section class="proposal-header print-only-header">
@@ -438,7 +536,7 @@ function renderMain() {
     </section>
 
     <section class="hero-panel">
-      <div><span class="eyebrow">Planejamento automático</span><h1>Monte o salão com segurança e apresente opções profissionais.</h1><p>Informe mesas e cadeiras. O sistema calcula áreas, respeita palco e cozinha e gera quatro padrões comparáveis.</p></div>
+      <div><span class="eyebrow">Planejamento automático + editor manual</span><h1>Gere uma base e ajuste cada detalhe diretamente na planta.</h1><p>Arraste mesas completas com as cadeiras, crie textos personalizados e exporte a proposta final em PNG ou PDF.</p></div>
       <div class="hero-badge"><strong>${selectedLayout.placements.length}</strong><span>mesas acomodadas</span></div>
     </section>
 
@@ -450,14 +548,15 @@ function renderMain() {
     </section>
 
     <section class="layout-selector no-print">
-      ${layouts.map((layout) => `<button data-layout="${layout.key}" class="layout-tab ${layout.key === selectedKey ? 'active' : ''}"><span>${layout.name}</span><small>${layout.placements.length}/${config.tableCount} mesas</small></button>`).join('')}
+      ${layouts.map((layout) => `<button data-layout="${layout.key}" class="layout-tab ${layout.key === selectedKey ? 'active' : ''}"><span>${layout.name}</span><small>${layout.placements.length}/${config.tableCount} mesas${Array.isArray(config.manualLayouts?.[layout.key]) && config.manualLayouts[layout.key].length ? ' · editado' : ''}</small></button>`).join('')}
     </section>
 
     <section class="plan-card">
       <div class="plan-toolbar">
-        <div><span class="eyebrow">Padrão selecionado</span><h2>${selectedLayout.name}</h2><p>${selectedLayout.subtitle}</p></div>
-        <div class="plan-actions no-print"><button class="button button-muted" id="export-png">Exportar PNG</button><button class="button button-primary" id="print-main">Gerar apresentação PDF</button></div>
+        <div><span class="eyebrow">Padrão selecionado ${hasManualLayout ? '· montagem manual' : ''}</span><h2>${selectedLayout.name}</h2><p>${selectedLayout.subtitle}</p></div>
+        <div class="plan-actions no-print"><button class="button button-muted" id="reset-manual-main">Refazer automático</button><button class="button button-muted" id="export-png">Exportar PNG</button><button class="button button-primary" id="print-main">Gerar apresentação PDF</button></div>
       </div>
+      <div class="editor-strip no-print"><strong>Editor manual:</strong> arraste mesas e textos com o mouse. <span id="editor-status" aria-live="polite">${escapeHtml(editorMessage)}</span></div>
       <div class="plan-stage">${renderFloorPlan(selectedLayout, false)}</div>
       <div class="plan-summary">
         <div class="summary-item"><span>Mesas posicionadas</span><strong>${selectedLayout.placements.length} de ${config.tableCount}</strong></div>
@@ -468,23 +567,28 @@ function renderMain() {
     </section>
 
     <section class="comparison-section no-print">
-      <div class="section-title-row"><div><span class="eyebrow">Comparação rápida</span><h2>Quatro propostas para apresentar ao cliente</h2></div><p>Clique em qualquer opção para abrir em tamanho grande.</p></div>
+      <div class="section-title-row"><div><span class="eyebrow">Comparação rápida</span><h2>Quatro propostas para apresentar ao cliente</h2></div><p>Clique em qualquer opção para abrir e editar em tamanho grande.</p></div>
       <div class="comparison-grid">
         ${layouts.map((layout) => `<button class="comparison-card" data-layout="${layout.key}"><div class="comparison-preview">${renderFloorPlan(layout, true)}</div><div class="comparison-copy"><strong>${layout.name}</strong><span>${layout.placements.length} mesas · até ${layout.capacity} lugares</span><p>${layout.subtitle}</p></div></button>`).join('')}
       </div>
     </section>
 
-    <section class="technical-note"><strong>Nota técnica</strong><p>Este planejamento é uma estimativa visual. Antes da montagem, confira portas, saídas de emergência, extintores, rotas acessíveis e exigências do AVCB. A planta foi corrigida para formato retangular: 24 m de largura total, 22 m livres até a cozinha e 22,60 m de comprimento. A profundidade da cozinha continua editável.</p></section>`;
+    <section class="technical-note"><strong>Nota técnica</strong><p>Este planejamento é uma estimativa visual. Antes da montagem, confira portas, saídas de emergência, extintores, rotas acessíveis e exigências do AVCB. O editor bloqueia mesas fora do salão, sobre palco, cozinha ou áreas reservadas, mas a conferência presencial continua indispensável.</p></section>`;
 
   document.querySelectorAll('[data-layout]').forEach((button) => {
     button.addEventListener('click', () => {
       selectedKey = button.dataset.layout;
+      selectedAnnotationId = null;
+      editorMessage = 'Padrão selecionado. Você já pode arrastar as mesas.';
       renderMain();
     });
   });
 
   document.getElementById('export-png').addEventListener('click', exportPng);
   document.getElementById('print-main').addEventListener('click', () => window.print());
+  document.getElementById('reset-manual-main').addEventListener('click', resetSelectedManualLayout);
+  bindCanvasEditor(selectedLayout);
+  syncTextEditor();
 }
 
 function statCard(label, value, detail) {
@@ -518,6 +622,38 @@ function syncForm() {
   });
 }
 
+function setEditorStatus(message) {
+  editorMessage = message;
+  const status = document.getElementById('editor-status');
+  if (status) status.textContent = message;
+}
+
+function syncTextEditor() {
+  const annotation = getSelectedAnnotation();
+  const controls = {
+    content: document.getElementById('text-content'),
+    color: document.getElementById('text-color'),
+    scale: document.getElementById('text-scale'),
+    rotation: document.getElementById('text-rotation'),
+    x: document.getElementById('text-x'),
+    y: document.getElementById('text-y'),
+    deleteButton: document.getElementById('delete-text')
+  };
+  const disabled = !annotation;
+  Object.entries(controls).forEach(([key, control]) => {
+    if (!control) return;
+    control.disabled = disabled;
+    if (disabled || key === 'deleteButton') return;
+    if (key === 'content') control.value = annotation.text;
+    if (key === 'color') control.value = annotation.color;
+    if (key === 'scale') control.value = annotation.scale;
+    if (key === 'rotation') control.value = annotation.rotation;
+    if (key === 'x') control.value = Number(annotation.x).toFixed(2);
+    if (key === 'y') control.value = Number(annotation.y).toFixed(2);
+  });
+  document.getElementById('text-editor')?.classList.toggle('is-disabled', disabled);
+}
+
 function bindForm() {
   document.querySelectorAll('[data-key]').forEach((input) => {
     input.addEventListener('input', () => {
@@ -546,9 +682,10 @@ function bindForm() {
 
   document.getElementById('print-top').addEventListener('click', () => window.print());
   document.getElementById('reset-project').addEventListener('click', () => {
-    if (!window.confirm('Restaurar todas as medidas e quantidades do exemplo inicial?')) return;
-    config = { ...DEFAULT_CONFIG };
+    if (!window.confirm('Restaurar todas as medidas, montagens manuais e textos do exemplo inicial?')) return;
+    config = cloneDefaultConfig();
     selectedKey = 'balanced';
+    selectedAnnotationId = null;
     persist();
     syncForm();
     renderMain();
@@ -556,10 +693,84 @@ function bindForm() {
 
   document.getElementById('save-project').addEventListener('click', saveProject);
   document.getElementById('open-project').addEventListener('change', (event) => openProject(event.target.files?.[0]));
+  document.getElementById('add-text').addEventListener('click', addAnnotation);
+  document.getElementById('delete-text').addEventListener('click', deleteSelectedAnnotation);
+  document.getElementById('reset-manual-layout').addEventListener('click', resetSelectedManualLayout);
+
+  const textBindings = [
+    ['text-content', 'text', (value) => value],
+    ['text-color', 'color', (value) => value],
+    ['text-scale', 'scale', (value) => clamp(safeNumber(value, 1), 0.4, 4)],
+    ['text-rotation', 'rotation', (value) => clamp(safeNumber(value, 0), -180, 180)],
+    ['text-x', 'x', (value) => clamp(safeNumber(value, 0), 0, config.roomWidth)],
+    ['text-y', 'y', (value) => clamp(safeNumber(value, 0), 0, config.roomDepth)]
+  ];
+  textBindings.forEach(([id, property, parser]) => {
+    document.getElementById(id).addEventListener('input', (event) => {
+      const annotation = getSelectedAnnotation();
+      if (!annotation) return;
+      annotation[property] = parser(event.target.value);
+      persist();
+      renderMain();
+    });
+  });
+
+  document.querySelectorAll('[data-text-color]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const annotation = getSelectedAnnotation();
+      if (!annotation) return;
+      annotation.color = button.dataset.textColor;
+      persist();
+      renderMain();
+    });
+  });
+}
+
+function addAnnotation() {
+  const annotation = {
+    id: `txt-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    text: 'Novo texto',
+    x: config.roomWidth / 2,
+    y: config.roomDepth / 2,
+    color: '#176b5b',
+    rotation: 0,
+    scale: 1
+  };
+  getAnnotations().push(annotation);
+  selectedAnnotationId = annotation.id;
+  persist();
+  editorMessage = 'Texto criado. Arraste na planta ou ajuste os controles laterais.';
+  renderMain();
+  document.getElementById('text-content')?.focus();
+  document.getElementById('text-content')?.select();
+}
+
+function deleteSelectedAnnotation() {
+  if (!selectedAnnotationId) return;
+  const annotations = getAnnotations();
+  const index = annotations.findIndex((item) => item.id === selectedAnnotationId);
+  if (index >= 0) annotations.splice(index, 1);
+  selectedAnnotationId = null;
+  persist();
+  editorMessage = 'Texto excluído.';
+  renderMain();
+}
+
+function resetSelectedManualLayout() {
+  const hasManual = Array.isArray(config.manualLayouts?.[selectedKey]) && config.manualLayouts[selectedKey].length;
+  if (!hasManual) {
+    setEditorStatus('Este padrão já está na distribuição automática.');
+    return;
+  }
+  if (!window.confirm('Descartar os ajustes manuais das mesas deste padrão? Os textos serão mantidos.')) return;
+  delete config.manualLayouts[selectedKey];
+  persist();
+  editorMessage = 'Distribuição automática restaurada.';
+  renderMain();
 }
 
 function saveProject() {
-  const blob = new Blob([JSON.stringify({ version: 1, config, selectedKey }, null, 2)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify({ version: 2, config, selectedKey }, null, 2)], { type: 'application/json' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
   link.download = 'projeto-evento.json';
@@ -574,16 +785,17 @@ function openProject(file) {
     try {
       const parsed = JSON.parse(String(reader.result));
       const incoming = parsed.config || parsed;
-      config = {
-        ...DEFAULT_CONFIG,
+      config = normalizeConfig({
         ...incoming,
         roomWidth: Number(incoming.roomWidth ?? incoming.roomTop ?? DEFAULT_CONFIG.roomWidth),
         clearWidth: Number(incoming.clearWidth ?? incoming.roomBottom ?? DEFAULT_CONFIG.clearWidth)
-      };
+      });
       config.clearWidth = clamp(config.clearWidth, 0, config.roomWidth);
       if (parsed.selectedKey && LAYOUT_INFO[parsed.selectedKey]) selectedKey = parsed.selectedKey;
+      selectedAnnotationId = null;
       persist();
       syncForm();
+      editorMessage = 'Projeto aberto com as montagens manuais e textos salvos.';
       renderMain();
     } catch {
       window.alert('Não foi possível abrir este arquivo de projeto.');
@@ -592,10 +804,188 @@ function openProject(file) {
   reader.readAsText(file);
 }
 
+function svgPointFromPointer(svg, event) {
+  const point = svg.createSVGPoint();
+  point.x = event.clientX;
+  point.y = event.clientY;
+  const matrix = svg.getScreenCTM();
+  if (!matrix) return { x: 0, y: 0 };
+  return point.matrixTransform(matrix.inverse());
+}
+
+function getPlacementVisualEnvelope(placement) {
+  const projection = 0.62;
+  const cx = placement.x + placement.w / 2;
+  const cy = placement.y + placement.h / 2;
+  let width = placement.w + projection * 2;
+  let height = placement.h + projection * 2;
+  if (config.tableShape === 'rect' && Math.abs(placement.angle % 180) === 90) {
+    [width, height] = [height, width];
+  }
+  return {
+    x: cx - width / 2,
+    y: cy - height / 2,
+    w: width,
+    h: height
+  };
+}
+
+function validatePlacement(candidate, layout) {
+  const envelope = getPlacementVisualEnvelope(candidate);
+  if (!isInsideRoom(envelope, 0.08)) {
+    return { valid: false, message: 'A mesa precisa permanecer totalmente dentro do salão.' };
+  }
+  if (getObstacles().some((obstacle) => rectsOverlap(envelope, obstacle, 0.03))) {
+    return { valid: false, message: 'A mesa não pode ocupar palco ou cozinha.' };
+  }
+  if (layout.reserved.some((zone) => rectsOverlap(envelope, zone, 0.03))) {
+    return { valid: false, message: 'A mesa não pode ocupar a área livre deste padrão.' };
+  }
+  const collision = layout.placements.some((other) => {
+    if (other.id === candidate.id) return false;
+    return rectsOverlap(envelope, getPlacementVisualEnvelope(other), 0.05);
+  });
+  if (collision) {
+    return { valid: false, message: 'As cadeiras desta mesa estão encostando em outra mesa.' };
+  }
+  return { valid: true, message: 'Posição válida. Solte para confirmar.' };
+}
+
+function storeManualLayout(layout) {
+  config.manualLayouts[selectedKey] = layout.placements.map((placement) => ({
+    id: placement.id,
+    x: roundCoordinate(placement.x),
+    y: roundCoordinate(placement.y)
+  }));
+  persist();
+}
+
+function roundCoordinate(value) {
+  return Math.round(value * 1000) / 1000;
+}
+
+function bindCanvasEditor(layout) {
+  const svg = document.getElementById('layout-svg');
+  if (!svg) return;
+
+  svg.querySelectorAll('[data-table-id]').forEach((group) => {
+    group.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      selectedAnnotationId = null;
+      syncTextEditor();
+      const tableId = Number(group.dataset.tableId);
+      const placement = layout.placements.find((item) => item.id === tableId);
+      if (!placement) return;
+      const start = svgPointFromPointer(svg, event);
+      const origin = { x: placement.x, y: placement.y };
+      let latest = { ...origin };
+      let latestValidation = { valid: true, message: '' };
+      group.setPointerCapture(event.pointerId);
+      group.classList.add('is-dragging');
+
+      const onMove = (moveEvent) => {
+        const current = svgPointFromPointer(svg, moveEvent);
+        latest = {
+          x: origin.x + current.x - start.x,
+          y: origin.y + current.y - start.y
+        };
+        const candidate = { ...placement, ...latest };
+        latestValidation = validatePlacement(candidate, layout);
+        group.setAttribute('transform', `translate(${latest.x - origin.x} ${latest.y - origin.y})`);
+        group.classList.toggle('is-invalid', !latestValidation.valid);
+        setEditorStatus(latestValidation.message);
+      };
+
+      const onEnd = (endEvent) => {
+        group.releasePointerCapture?.(endEvent.pointerId);
+        group.removeEventListener('pointermove', onMove);
+        group.removeEventListener('pointerup', onEnd);
+        group.removeEventListener('pointercancel', onCancel);
+        group.classList.remove('is-dragging', 'is-invalid');
+        group.removeAttribute('transform');
+        if (latestValidation.valid) {
+          placement.x = latest.x;
+          placement.y = latest.y;
+          storeManualLayout(layout);
+          editorMessage = `Mesa M${placement.id} reposicionada com todas as cadeiras.`;
+        } else {
+          editorMessage = `Posição cancelada: ${latestValidation.message}`;
+        }
+        renderMain();
+      };
+
+      const onCancel = (cancelEvent) => {
+        latestValidation = { valid: false, message: 'Movimento cancelado.' };
+        onEnd(cancelEvent);
+      };
+
+      group.addEventListener('pointermove', onMove);
+      group.addEventListener('pointerup', onEnd);
+      group.addEventListener('pointercancel', onCancel);
+    });
+  });
+
+  svg.querySelectorAll('[data-annotation-id]').forEach((group) => {
+    group.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const annotation = getAnnotations().find((item) => item.id === group.dataset.annotationId);
+      if (!annotation) return;
+      selectedAnnotationId = annotation.id;
+      syncTextEditor();
+      const start = svgPointFromPointer(svg, event);
+      const origin = { x: annotation.x, y: annotation.y };
+      let latest = { ...origin };
+      group.setPointerCapture(event.pointerId);
+      group.classList.add('is-dragging');
+
+      const onMove = (moveEvent) => {
+        const current = svgPointFromPointer(svg, moveEvent);
+        latest = {
+          x: clamp(origin.x + current.x - start.x, 0, config.roomWidth),
+          y: clamp(origin.y + current.y - start.y, 0, config.roomDepth)
+        };
+        group.setAttribute('transform', `translate(${latest.x} ${latest.y})`);
+        setEditorStatus(`Texto em X ${latest.x.toFixed(2)} m · Y ${latest.y.toFixed(2)} m.`);
+      };
+
+      const onEnd = (endEvent) => {
+        group.releasePointerCapture?.(endEvent.pointerId);
+        group.removeEventListener('pointermove', onMove);
+        group.removeEventListener('pointerup', onEnd);
+        group.removeEventListener('pointercancel', onEnd);
+        group.classList.remove('is-dragging');
+        annotation.x = roundCoordinate(latest.x);
+        annotation.y = roundCoordinate(latest.y);
+        persist();
+        editorMessage = 'Texto reposicionado. Use os controles laterais para cor, escala e rotação.';
+        suppressCanvasClickUntil = Date.now() + 700;
+        renderMain();
+      };
+
+      group.addEventListener('pointermove', onMove);
+      group.addEventListener('pointerup', onEnd);
+      group.addEventListener('pointercancel', onEnd);
+    });
+  });
+
+  svg.addEventListener('click', (event) => {
+    if (Date.now() < suppressCanvasClickUntil) return;
+    if (event.target.closest('[data-table-id], [data-annotation-id]')) return;
+    if (!selectedAnnotationId) return;
+    selectedAnnotationId = null;
+    editorMessage = 'Seleção de texto removida.';
+    renderMain();
+  });
+}
+
 function exportPng() {
   const svg = document.getElementById('layout-svg');
   if (!svg) return;
   const cloned = svg.cloneNode(true);
+  cloned.querySelectorAll('[data-editor-only]').forEach((element) => element.remove());
+  cloned.querySelectorAll('.is-dragging, .is-invalid').forEach((element) => element.classList.remove('is-dragging', 'is-invalid'));
   cloned.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
   const styleText = Array.from(document.styleSheets)
     .map((sheet) => {
